@@ -152,3 +152,7 @@ FUTURE_WORK.md
 
 # Package configuration
 setup.py
+
+# Allow GitHub workflow files
+!.github/workflows/*.yml
+!.github/workflows/*.yaml
