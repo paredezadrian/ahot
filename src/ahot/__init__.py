@@ -24,6 +24,12 @@ import warnings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+try:  # pragma: no cover - circular import safe guard
+    from .vocabulary import VocabularyBuilder, MemoryAwareVocabSizer
+except Exception:  # pragma: no cover - during partial initialisation
+    VocabularyBuilder = None  # type: ignore
+    MemoryAwareVocabSizer = None  # type: ignore
+
 @dataclass
 class HardwareProfile:
     cpu_cores: int
@@ -1202,23 +1208,64 @@ class OptimizedAHOTTokenizer(AHOTTokenizer):
 
 class AHOTFactory:
     @staticmethod
-    def create_tokenizer(vocab_size: int = 50000, embedding_dim: int = 256) -> AHOTTokenizer:
-        if vocab_size <= 0:
-            raise ValueError("vocab_size must be positive")
-        
+    def create_tokenizer(
+        vocab_size: Optional[int] = None,
+        embedding_dim: int = 256,
+        training_texts: Optional[List[str]] = None,
+    ) -> AHOTTokenizer:
+        """Create a tokenizer with an adaptive vocabulary.
+
+        Parameters
+        ----------
+        vocab_size:
+            Optional user supplied vocabulary size.  When ``None`` a size is
+            calculated based on available memory using
+            :class:`MemoryAwareVocabSizer`.
+        embedding_dim:
+            Dimension of the embedding table.
+        training_texts:
+            Optional corpus used to build a learned vocabulary.  When omitted an
+            empty corpus is assumed which results in a minimal vocabulary
+            containing only special tokens.
+        """
+
         if embedding_dim <= 0:
             raise ValueError("embedding_dim must be positive")
-        
         if embedding_dim % 2 != 0:
-            raise ValueError("embedding_dim must be even for proper layer construction")
-        
+            raise ValueError(
+                "embedding_dim must be even for proper layer construction"
+            )
+
         analyzer = HardwareAnalyzer()
         hardware_profile = analyzer.get_profile()
+
+        # Determine an appropriate vocabulary size if none was provided.
+        if vocab_size is None:
+            if MemoryAwareVocabSizer is None:
+                raise RuntimeError("MemoryAwareVocabSizer unavailable")
+            sizer = MemoryAwareVocabSizer()
+            vocab_size = sizer.calculate_optimal_vocab_size(
+                hardware_profile.memory_gb, embedding_dim, hardware_profile.gpu_available
+            )
+
+        # Build a vocabulary for the given corpus.
+        if VocabularyBuilder is None:
+            raise RuntimeError("VocabularyBuilder unavailable")
+        builder = VocabularyBuilder.from_hardware_profile(hardware_profile)
+        vocabulary = builder.build_from_corpus(
+            training_texts or [], target_vocab_size=vocab_size
+        )
+
         tokenizer = AHOTTokenizer(hardware_profile, vocab_size, embedding_dim)
-        
-        logger.info(f"AHOT tokenizer created with vocab_size={vocab_size}, "
-                   f"embedding_dim={embedding_dim}")
-        
+        # Attach the vocabulary to the tokenizer instance so downstream
+        # components can reuse it if required.
+        tokenizer.vocabulary = vocabulary
+
+        logger.info(
+            f"AHOT tokenizer created with vocab_size={vocab_size}, "
+            f"embedding_dim={embedding_dim}, algorithm={builder.algorithm}"
+        )
+
         return tokenizer
     
     @staticmethod
