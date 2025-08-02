@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Benchmark utilities for evaluating AHOT tokenizer performance."""
 
 import torch
 import time

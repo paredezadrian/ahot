@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""Core implementation for the Adaptive Hardware-Oriented Tokenizer (AHOT).
+
+This module contains utilities for analysing system hardware, building
+hardware-aware tokenizers and monitoring their runtime performance.
+"""
 
 import torch
 import torch.nn as nn
@@ -63,11 +68,14 @@ class CacheMetrics:
     avg_access_time_ms: float
 
 class HardwareAnalyzer:
+    """Detects hardware capabilities for configuring the tokenizer."""
+
     def __init__(self):
         self.profile = self._analyze_hardware()
         logger.info(f"Hardware analysis completed: {self.profile.device_type}")
     
     def _analyze_hardware(self) -> HardwareProfile:
+        """Collect detailed information about CPU, memory and GPU."""
         cpu_cores = psutil.cpu_count(logical=True)
         cpu_freq = psutil.cpu_freq()
         cpu_frequency_ghz = None
@@ -117,7 +125,7 @@ class HardwareAnalyzer:
         else:
             return 'mobile'
     
-    def _calculate_processing_power(self, cpu_cores: int, memory_gb: float, 
+    def _calculate_processing_power(self, cpu_cores: int, memory_gb: float,
                                   gpu_available: bool, cpu_freq_ghz: Optional[float]) -> float:
         if cpu_cores <= 0:
             raise ValueError("cpu_cores must be positive")
@@ -128,6 +136,7 @@ class HardwareAnalyzer:
         if cpu_freq_ghz is not None and cpu_freq_ghz <= 0:
             raise ValueError("cpu_freq_ghz must be positive if provided")
         
+        # Normalise CPU and memory contributions to a 0-1 range
         cpu_score = min(cpu_cores / 32, 1.0)
         memory_score = min(memory_gb / 64, 1.0)
         
@@ -137,14 +146,17 @@ class HardwareAnalyzer:
         
         gpu_bonus = 0.3 if gpu_available else 0.0
         
-        processing_power = (0.4 * cpu_score + 
-                          0.3 * memory_score + 
-                          0.2 * gpu_bonus + 
+        # Weighted sum prioritises CPU and memory while still accounting for
+        # GPU presence and higher clock speeds.
+        processing_power = (0.4 * cpu_score +
+                          0.3 * memory_score +
+                          0.2 * gpu_bonus +
                           0.1 * freq_bonus)
         
         return min(processing_power, 1.0)
     
     def _calculate_memory_efficiency(self, memory_gb: float, os_type: str) -> float:
+        """Estimate how effectively the operating system uses available RAM."""
         if memory_gb < 0:
             raise ValueError("memory_gb must be non-negative")
         
@@ -464,9 +476,11 @@ class HardwareAnalyzer:
             return None
     
     def get_profile(self) -> HardwareProfile:
+        """Return the detected hardware profile."""
         return self.profile
-    
+
     def print_profile(self):
+        """Print the current hardware profile in a readable format."""
         p = self.profile
         print("🔍 AHOT Hardware Analysis")
         print("=" * 50)
@@ -812,7 +826,9 @@ class AdaptiveChunkingLayer(nn.Module):
         }
 
 class AHOTTokenizer(nn.Module):
-    def __init__(self, hardware_profile: HardwareProfile, vocab_size: int = 50000, 
+    """Tokenizer that adapts its architecture based on detected hardware."""
+
+    def __init__(self, hardware_profile: HardwareProfile, vocab_size: int = 50000,
                  embedding_dim: int = 256):
         super().__init__()
         
@@ -952,9 +968,10 @@ class AHOTTokenizer(nn.Module):
         return weights
     
     def encode(self, text: str) -> Tuple[torch.Tensor, Dict]:
+        """Encode text into tokens and return performance information."""
         if not text or not text.strip():
             raise ValueError("Input text cannot be empty or contain only whitespace")
-        
+
         # Performance monitoring
         start_time = time.time()
         
@@ -967,6 +984,7 @@ class AHOTTokenizer(nn.Module):
             raise ValueError("No valid ASCII characters found in input text")
         # ---------- END CRITICAL SECTION ----------
         
+        # Convert characters to tensor indices
         char_indices = torch.tensor([ord(c) for c in text], dtype=torch.long)
         char_indices = char_indices.unsqueeze(0)
         
@@ -1201,8 +1219,11 @@ class OptimizedAHOTTokenizer(AHOTTokenizer):
         return base_weights
 
 class AHOTFactory:
+    """Factory methods for constructing AHOT tokenizers."""
+
     @staticmethod
     def create_tokenizer(vocab_size: int = 50000, embedding_dim: int = 256) -> AHOTTokenizer:
+        """Create a basic tokenizer using the current hardware profile."""
         if vocab_size <= 0:
             raise ValueError("vocab_size must be positive")
         

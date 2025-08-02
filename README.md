@@ -105,6 +105,12 @@ tokens, info = tokenizer.encode("GPU test")
 print(f"GPU: {info['hardware_optimizations']['gpu_acceleration']}")
 ```
 
+## Documentation
+
+- [API Reference](docs/API.md) – detailed information about core classes and
+  functions.
+- [Examples](examples/README.md) – runnable demonstrations of the tokenizer.
+
 ## Architecture
 
 ### Core Components
