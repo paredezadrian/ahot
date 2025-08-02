@@ -67,17 +67,14 @@ coverage.xml
 *.log
 logs/
 
-# Generated files
-*.png
+# Generated files (excluding documentation images)
 *.jpg
 *.jpeg
 *.gif
 *.svg
 *.pdf
 
-# Results and outputs
-images/
-Results/
+# Results and outputs (excluding documentation)
 *.json
 *.csv
 *.tsv
