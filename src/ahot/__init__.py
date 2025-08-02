@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - circular import safe guard
     from .vocabulary import VocabularyBuilder, MemoryAwareVocabSizer
-except Exception:  # pragma: no cover - during partial initialisation
+except ImportError:  # pragma: no cover - during partial initialisation
     VocabularyBuilder = None  # type: ignore
     MemoryAwareVocabSizer = None  # type: ignore
 
@@ -75,12 +75,17 @@ class HardwareAnalyzer:
     
     def _analyze_hardware(self) -> HardwareProfile:
         cpu_cores = psutil.cpu_count(logical=True)
+        if not cpu_cores or cpu_cores <= 0:
+            raise RuntimeError("Unable to determine a valid number of CPU cores")
+
         cpu_freq = psutil.cpu_freq()
         cpu_frequency_ghz = None
         if cpu_freq and cpu_freq.current:
             cpu_frequency_ghz = cpu_freq.current / 1000.0
-        
+
         memory = psutil.virtual_memory()
+        if memory.total <= 0:
+            raise RuntimeError("Unable to determine total system memory")
         memory_gb = memory.total / (1024**3)
         
         gpu_available = torch.cuda.is_available()
@@ -763,10 +768,6 @@ class AdaptiveChunkingLayer(nn.Module):
             x = x[:self.batch_size_limit]
             batch_size = self.batch_size_limit
         
-        # GPU memory management
-        if self.gpu_acceleration['enabled']:
-            torch.cuda.empty_cache()
-        
         # Enhanced attention computation with GPU optimization
         with torch.cuda.amp.autocast() if self.mixed_precision else torch.no_grad():
             attn_output, attn_weights = self.attention(x, x, x)
@@ -797,10 +798,6 @@ class AdaptiveChunkingLayer(nn.Module):
         if self.use_half_precision:
             output = output.float()
             weights = weights.float()
-        
-        # GPU memory cleanup
-        if self.gpu_acceleration['enabled']:
-            torch.cuda.empty_cache()
         
         return output, {
             'chunk_weights': weights,
