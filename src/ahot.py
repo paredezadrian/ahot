@@ -2,7 +2,6 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 import psutil
 import platform
@@ -10,16 +9,14 @@ import time
 import subprocess
 import re
 import os
-from typing import Dict, List, Tuple, Optional, Union
+import shutil
+from typing import Dict, Tuple, Optional, List
 from dataclasses import dataclass
-from pathlib import Path
 import json
 import logging
 import threading
 import queue
-from collections import defaultdict, deque
-import gc
-import warnings
+from collections import deque
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -182,86 +179,90 @@ class HardwareAnalyzer:
         except Exception as e:
             logger.warning(f"Cache analysis failed: {e}")
             return None
-    
+
+    def _run_command(self, command: List[str]) -> Optional[subprocess.CompletedProcess]:
+        """Safely run a system command and return the CompletedProcess."""
+        cmd_path = shutil.which(command[0])
+        if not cmd_path:
+            logger.debug(f"{command[0]} command not found")
+            return None
+        try:
+            return subprocess.run([cmd_path, *command[1:]], capture_output=True, text=True, timeout=10, shell=False)
+        except Exception as e:
+            logger.debug(f"Command {command[0]} failed: {e}")
+            return None
+
     def _analyze_cache_windows(self) -> Optional[float]:
         """Analyze cache on Windows using multiple methods."""
         try:
-            try:
-                result = subprocess.run(
-                    ['wmic', 'cpu', 'get', 'L2CacheSize,L3CacheSize', '/format:csv'],
-                    capture_output=True, text=True, timeout=10
-                )
-                
-                if result.returncode == 0:
-                    lines = result.stdout.strip().split('\n')
-                    if len(lines) >= 2:
-                        parts = lines[1].split(',')
-                        if len(parts) >= 3:
-                            l2_size = self._parse_cache_size(parts[1])
-                            l3_size = self._parse_cache_size(parts[2])
-                            
-                            total_cache = (l2_size or 0) + (l3_size or 0)
-                            if total_cache > 0:
-                                return total_cache / 1024.0
-            except FileNotFoundError:
-                logger.debug("wmic command not available")
+            result = self._run_command([
+                'wmic',
+                'cpu',
+                'get',
+                'L2CacheSize,L3CacheSize',
+                '/format:csv',
+            ])
+            if result and result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) >= 2:
+                    parts = lines[1].split(',')
+                    if len(parts) >= 3:
+                        l2_size = self._parse_cache_size(parts[1])
+                        l3_size = self._parse_cache_size(parts[2])
+                        total_cache = (l2_size or 0) + (l3_size or 0)
+                        if total_cache > 0:
+                            return total_cache / 1024.0
 
-            try:
-                result = subprocess.run(
-                    ['powershell', '-Command', 'Get-WmiObject -Class Win32_Processor | Select-Object L2CacheSize,L3CacheSize | ConvertTo-Csv'],
-                    capture_output=True, text=True, timeout=10
-                )
-                
-                if result.returncode == 0:
-                    lines = result.stdout.strip().split('\n')
-                    if len(lines) >= 3:
-                        data_line = lines[2]
-                        parts = [part.strip('"') for part in data_line.split(',')]
-                        if len(parts) >= 2:
-                            l2_size = self._parse_cache_size(parts[0])
-                            l3_size = self._parse_cache_size(parts[1])
-                            
-                            total_cache = (l2_size or 0) + (l3_size or 0)
-                            if total_cache > 0:
-                                return total_cache / 1024.0
-            except Exception as e:
-                logger.debug(f"PowerShell cache analysis failed: {e}")
-            
-            try:
-                result = subprocess.run(
-                    ['powershell', '-Command', 'Get-CimInstance -ClassName Win32_Processor | Select-Object L2CacheSize,L3CacheSize | ConvertTo-Csv'],
-                    capture_output=True, text=True, timeout=10
-                )
-                
-                if result.returncode == 0:
-                    lines = result.stdout.strip().split('\n')
-                    if len(lines) >= 3:
-                        data_line = lines[2]
-                        parts = [part.strip('"') for part in data_line.split(',')]
-                        if len(parts) >= 2:
-                            l2_size = self._parse_cache_size(parts[0])
-                            l3_size = self._parse_cache_size(parts[1])
-                            
-                            total_cache = (l2_size or 0) + (l3_size or 0)
-                            if total_cache > 0:
-                                return total_cache / 1024.0
-            except Exception as e:
-                logger.debug(f"Get-CimInstance cache analysis failed: {e}")
-            
+            result = self._run_command([
+                'powershell',
+                '-Command',
+                'Get-WmiObject -Class Win32_Processor | Select-Object L2CacheSize,L3CacheSize | ConvertTo-Csv',
+            ])
+            if result and result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) >= 3:
+                    data_line = lines[2]
+                    parts = [part.strip('"') for part in data_line.split(',')]
+                    if len(parts) >= 2:
+                        l2_size = self._parse_cache_size(parts[0])
+                        l3_size = self._parse_cache_size(parts[1])
+                        total_cache = (l2_size or 0) + (l3_size or 0)
+                        if total_cache > 0:
+                            return total_cache / 1024.0
+
+            result = self._run_command([
+                'powershell',
+                '-Command',
+                'Get-CimInstance -ClassName Win32_Processor | Select-Object L2CacheSize,L3CacheSize | ConvertTo-Csv',
+            ])
+            if result and result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) >= 3:
+                    data_line = lines[2]
+                    parts = [part.strip('"') for part in data_line.split(',')]
+                    if len(parts) >= 2:
+                        l2_size = self._parse_cache_size(parts[0])
+                        l3_size = self._parse_cache_size(parts[1])
+                        total_cache = (l2_size or 0) + (l3_size or 0)
+                        if total_cache > 0:
+                            return total_cache / 1024.0
+
             return self._analyze_cache_windows_registry()
-            
+
         except Exception as e:
             logger.debug(f"Windows cache analysis failed: {e}")
             return None
     
     def _analyze_cache_windows_registry(self) -> Optional[float]:
         try:
-            result = subprocess.run(
-                ['reg', 'query', 'HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0', '/v', '~MHz'],
-                capture_output=True, text=True, timeout=10
-            )
-            
-            if result.returncode == 0:
+            result = self._run_command([
+                'reg',
+                'query',
+                'HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0',
+                '/v',
+                '~MHz',
+            ])
+            if result and result.returncode == 0:
                 match = re.search(r'~MHz\s+REG_DWORD\s+0x[0-9a-fA-F]+\s+\((\d+)\)', result.stdout)
                 if match:
                     cpu_freq = int(match.group(1))
@@ -271,9 +272,9 @@ class HardwareAnalyzer:
                         return 4.0
                     else:
                         return 2.0
-            
+
             return None
-            
+
         except Exception as e:
             logger.debug(f"Windows registry cache analysis failed: {e}")
             return None
@@ -340,32 +341,28 @@ class HardwareAnalyzer:
     def _analyze_cache_macos(self) -> Optional[float]:
         """Analyze cache on macOS using system_profiler."""
         try:
-            result = subprocess.run(
-                ['system_profiler', 'SPHardwareDataType'],
-                capture_output=True, text=True, timeout=10
-            )
-            
-            if result.returncode == 0:
+            result = self._run_command(['system_profiler', 'SPHardwareDataType'])
+            if result and result.returncode == 0:
                 output = result.stdout
-                
+
                 l1_match = re.search(r'L1\s+cache:\s*(\d+)\s*KB', output)
                 l2_match = re.search(r'L2\s+cache:\s*(\d+)\s*KB', output)
                 l3_match = re.search(r'L3\s+cache:\s*(\d+)\s*KB', output)
-                
+
                 total_cache_kb = 0
-                
+
                 if l1_match:
                     total_cache_kb += int(l1_match.group(1))
                 if l2_match:
                     total_cache_kb += int(l2_match.group(1))
                 if l3_match:
                     total_cache_kb += int(l3_match.group(1))
-                
+
                 if total_cache_kb > 0:
                     return total_cache_kb / 1024.0
-            
+
             return self._analyze_cache_macos_sysctl()
-            
+
         except Exception as e:
             logger.debug(f"macOS cache analysis failed: {e}")
             return None
@@ -373,24 +370,27 @@ class HardwareAnalyzer:
     def _analyze_cache_macos_sysctl(self) -> Optional[float]:
         """Fallback cache analysis using macOS sysctl."""
         try:
-            result = subprocess.run(
-                ['sysctl', '-n', 'hw.cachelinesize', 'hw.l1dcachesize', 'hw.l1icachesize', 'hw.l2cachesize'],
-                capture_output=True, text=True, timeout=10
-            )
-            
-            if result.returncode == 0:
+            result = self._run_command([
+                'sysctl',
+                '-n',
+                'hw.cachelinesize',
+                'hw.l1dcachesize',
+                'hw.l1icachesize',
+                'hw.l2cachesize',
+            ])
+            if result and result.returncode == 0:
                 lines = result.stdout.strip().split('\n')
                 if len(lines) >= 4:
                     l1d_size = self._parse_cache_size_bytes(lines[1])
                     l1i_size = self._parse_cache_size_bytes(lines[2])
                     l2_size = self._parse_cache_size_bytes(lines[3])
-                    
+
                     total_cache_bytes = (l1d_size or 0) + (l1i_size or 0) + (l2_size or 0)
                     if total_cache_bytes > 0:
                         return total_cache_bytes / (1024 * 1024)
-            
+
             return None
-            
+
         except Exception as e:
             logger.debug(f"macOS sysctl cache analysis failed: {e}")
             return None
@@ -529,7 +529,7 @@ class AdaptiveChunkingLayer(nn.Module):
         self.compression = nn.Sequential(
             nn.Linear(input_dim, input_dim // self.compression_factor),
             nn.ReLU(),
-            nn.Linear(input_dim // self.compression_factor, input_dim // self.compression_factor)
+            nn.Linear(input_dim // self.compression_factor, output_dim)
         )
         
         # Enhanced GPU acceleration support
