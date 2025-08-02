@@ -121,6 +121,7 @@ docker-compose.yml
 *.yaml
 *.yml
 !requirements.yml
+!.github/workflows/*.yml
 
 # Backup files
 *.bak
