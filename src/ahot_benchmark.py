@@ -5,17 +5,15 @@ import time
 import json
 import psutil
 import platform
-import subprocess
-import os
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from dataclasses import dataclass, asdict
 import logging
 
-from ahot import AHOTFactory, HardwareAnalyzer, ProductionMonitor
+from ahot import AHOTFactory, HardwareAnalyzer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -134,7 +132,7 @@ class AHOTBenchmarker:
             
             # Decoding
             start_time = time.time()
-            decoded_text = tokenizer.decode(tokens)
+            _ = tokenizer.decode(tokens)
             decoding_time = (time.time() - start_time) * 1000
             
             # Memory measurement after
@@ -148,7 +146,7 @@ class AHOTBenchmarker:
             decoding_times.append(decoding_time)
             compression_ratios.append(info['performance']['compression_ratio'])
             memory_usages.append(memory_after - memory_before)
-            if gpu_memory_before and gpu_memory_after:
+            if gpu_memory_before is not None and gpu_memory_after is not None:
                 gpu_memory_usages.append(gpu_memory_after - gpu_memory_before)
         
         # Calculate averages
